@@ -1,0 +1,22 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: k8s_attack_path_worker
+  author: k8s-attack-path-workshop
+  description: Joins a worker node to the K8s Attack Path workshop cluster using the join command staged by the control plane
+  company: ''
+  license: Apache-2.0
+  min_ansible_version: "2.10"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - kubernetes
+    - worker
+    - workshop
+    - ludus
+
+collections: []

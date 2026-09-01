@@ -1,0 +1,22 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: k8s_attack_path_workshop
+  author: k8s-attack-path-workshop
+  description: Applies the workshop manifests (code-server, cicd, prod-backend, RBAC roles for the attack path labs) and taints worker-1 for later labs
+  company: ''
+  license: Apache-2.0
+  min_ansible_version: "2.10"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - kubernetes
+    - manifests
+    - workshop
+    - ludus
+
+collections: []

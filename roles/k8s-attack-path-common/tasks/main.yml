@@ -1,0 +1,205 @@
+---
+- name: Configure /etc/hosts for workshop VMs
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} K8s Attack Path Workshop"
+    block: |
+      {% for entry in hosts_entries %}
+      {{ entry.ip }} {{ entry.names }}
+      {% endfor %}
+
+- name: Install required packages
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - software-properties-common
+      - bash-completion
+      - openssl
+    state: present
+    update_cache: true
+
+- name: Create keyrings directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Add Docker GPG key
+  ansible.builtin.shell: |
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --batch --yes --no-tty --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+  args:
+    creates: /etc/apt/keyrings/docker.gpg
+
+- name: Add Docker repository
+  ansible.builtin.shell: |
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+      | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  args:
+    creates: /etc/apt/sources.list.d/docker.list
+
+- name: Install containerd
+  ansible.builtin.apt:
+    name: containerd.io
+    state: present
+    update_cache: true
+
+- name: Create containerd config directory
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    mode: "0755"
+
+- name: Generate default containerd config
+  ansible.builtin.shell: containerd config default > /etc/containerd/config.toml
+  # No `creates:` guard — the containerd.io package ships a stub config with
+  # the CRI plugin disabled, so we must always regenerate it.
+  changed_when: true
+
+- name: Enable SystemdCgroup in containerd
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+
+- name: Restart and enable containerd
+  ansible.builtin.systemd:
+    name: containerd
+    state: restarted
+    enabled: true
+    daemon_reload: true
+
+- name: Install CNI plugins
+  ansible.builtin.shell: |
+    mkdir -p /opt/cni/bin
+    curl -L "https://github.com/containernetworking/plugins/releases/download/{{ cni_version }}/cni-plugins-linux-amd64-{{ cni_version }}.tgz" \
+      | tar -C /opt/cni/bin -xz
+  args:
+    creates: /opt/cni/bin/bridge
+
+- name: Add Kubernetes GPG key
+  ansible.builtin.shell: |
+    curl -fsSL "https://pkgs.k8s.io/core:/stable:/{{ k8s_major_version }}/deb/Release.key" \
+      | gpg --batch --yes --no-tty --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  args:
+    creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+- name: Add Kubernetes repository
+  ansible.builtin.shell: |
+    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/{{ k8s_major_version }}/deb/ /" \
+      | tee /etc/apt/sources.list.d/kubernetes.list
+  args:
+    creates: /etc/apt/sources.list.d/kubernetes.list
+
+- name: Install Kubernetes packages
+  ansible.builtin.apt:
+    name:
+      - "kubeadm={{ k8s_version }}"
+      - "kubelet={{ k8s_version }}"
+      - "kubectl={{ k8s_version }}"
+    state: present
+    update_cache: true
+
+- name: Hold Kubernetes packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop:
+    - kubelet
+    - kubeadm
+    - kubectl
+
+- name: Pre-pull Calico images
+  ansible.builtin.shell: "ctr -n k8s.io images pull {{ item }}"
+  loop:
+    - "quay.io/tigera/operator:{{ tigera_operator_version }}"
+    - "docker.io/calico/node:{{ calico_version }}"
+    - "docker.io/calico/cni:{{ calico_version }}"
+    - "docker.io/calico/typha:{{ calico_version }}"
+    - "docker.io/calico/kube-controllers:{{ calico_version }}"
+    - "docker.io/calico/pod2daemon-flexvol:{{ calico_version }}"
+    - "docker.io/calico/csi:{{ calico_version }}"
+    - "docker.io/calico/node-driver-registrar:{{ calico_version }}"
+    - "docker.io/calico/apiserver:{{ calico_version }}"
+    - "docker.io/calico/key-cert-provisioner:{{ calico_version }}"
+  register: calico_pull
+  retries: 5
+  delay: 20
+  until: calico_pull.rc == 0
+
+- name: Load required kernel modules
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - br_netfilter
+    - overlay
+
+- name: Persist kernel modules
+  ansible.builtin.copy:
+    content: |
+      br_netfilter
+      overlay
+    dest: /etc/modules-load.d/k8s.conf
+    mode: "0644"
+
+- name: Set sysctl parameters for Kubernetes
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/k8s.conf
+    reload: true
+    state: present
+  loop:
+    - { name: "net.bridge.bridge-nf-call-iptables", value: "1" }
+    - { name: "net.bridge.bridge-nf-call-ip6tables", value: "1" }
+    - { name: "net.ipv4.ip_forward", value: "1" }
+
+- name: Disable swap
+  ansible.builtin.shell: swapoff -a
+  changed_when: false
+
+- name: Remove swap from fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '\sswap\s'
+    state: absent
+
+- name: Create kubelet override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/kubelet.service.d
+    state: directory
+    mode: "0755"
+
+- name: Configure kubelet to depend on containerd
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      After=containerd.service
+      Requires=containerd.service
+    dest: /etc/systemd/system/kubelet.service.d/override.conf
+    mode: "0644"
+  notify: Daemon reload
+
+- name: Set up kubectl alias for ansible_user
+  ansible.builtin.lineinfile:
+    path: "/home/{{ ansible_user }}/.bashrc"
+    line: "{{ item }}"
+    create: true
+  loop:
+    - "alias k=kubectl"
+    - "source <(kubectl completion bash)"
+    - "complete -F __start_kubectl k"
+
+- name: Create staging directory on controller
+  ansible.builtin.file:
+    path: "{{ staging_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+  run_once: true

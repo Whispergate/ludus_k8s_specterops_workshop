@@ -1,0 +1,219 @@
+---
+# This role runs AFTER 0xRedpoll.ludus_mythic_teamserver which handles:
+#   - Docker installation
+#   - Mythic clone, build, and start
+#   - HTTP, Poseidon, Apfell, Thanatos agent installation
+#   - Mythic systemd service
+#   - Binding Mythic to all interfaces (VPN-accessible)
+
+- name: Configure /etc/hosts for workshop VMs
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} K8s Attack Path Workshop"
+    block: |
+      {% for entry in hosts_entries %}
+      {{ entry.ip }} {{ entry.names }}
+      {% endfor %}
+  when: hosts_entries | length > 0
+
+# --- Install extra Mythic agents needed by the workshop ---
+# whispergate.ludus_mythic_teamserver installs: HTTP, SMB, service_wrapper,
+# forge, Apollo, Starburst, Erebus. The workshop additionally needs Poseidon
+# (the payload_setup.py script below builds a Poseidon payload) plus the two
+# elreydetoda container agents.
+
+- name: Install Poseidon agent
+  ansible.builtin.command: "{{ mythic_cli }} install github https://github.com/MythicAgents/poseidon -f"
+  args:
+    chdir: "{{ mythic_dir }}"
+  become: true
+
+- name: Install container_wrapper agent
+  ansible.builtin.command: "{{ mythic_cli }} install github https://github.com/elreydetoda/container_wrapper -f"
+  args:
+    chdir: "{{ mythic_dir }}"
+  become: true
+
+- name: Install container_registry agent
+  ansible.builtin.command: "{{ mythic_cli }} install github https://github.com/elreydetoda/container_registry -f"
+  args:
+    chdir: "{{ mythic_dir }}"
+  become: true
+
+- name: Start extra agents
+  ansible.builtin.command: "{{ mythic_cli }} start {{ item }}"
+  args:
+    chdir: "{{ mythic_dir }}"
+  become: true
+  loop:
+    - poseidon
+    - container_wrapper
+    - container_registry
+
+# --- Workshop-specific setup ---
+
+- name: Create workshop users
+  ansible.builtin.user:
+    name: "{{ item }}"
+    password: "!"
+    shell: /bin/bash
+  loop: "{{ base_users }}"
+
+- name: Install kubectl via snap
+  community.general.snap:
+    channel: 1.35/candidate
+    classic: true
+    name:
+      - kubectl
+
+- name: Read Mythic .env file
+  ansible.builtin.slurp:
+    src: "{{ mythic_dir }}/.env"
+  register: mythic_env_raw
+
+- name: Parse Mythic .env into dictionary
+  ansible.builtin.set_fact:
+    mythic_env_vars: >-
+      {{
+        dict(
+          mythic_env_raw.content
+          | b64decode
+          | regex_findall('(?m)^([^#=\\s]+)=["'']?(.*?)["'']?$')
+        )
+      }}
+
+- name: Authenticate to Mythic
+  ansible.builtin.uri:
+    creates: "{{ api_token_file }}"
+    url: "https://{{ teamserver_ip }}:7443/auth"
+    validate_certs: false
+    method: POST
+    status_code: 200
+    body_format: json
+    body: |
+      {
+          "username": "{{ mythic_env_vars['MYTHIC_ADMIN_USER'] }}",
+          "password": "{{ mythic_env_vars['MYTHIC_ADMIN_PASSWORD'] }}"
+      }
+  register: auth_response
+
+- name: Create API token
+  ansible.builtin.uri:
+    creates: "{{ api_token_file }}"
+    url: "https://{{ teamserver_ip }}:7443/graphql/"
+    validate_certs: false
+    method: POST
+    status_code: 200
+    headers:
+      authorization: "Bearer {{ auth_response.json.access_token | default() }}"
+    body_format: json
+    body: |
+      {
+          "operationName": "createAPITokenMutation",
+          "variables": {
+              "operator_id": 1,
+              "name": "initial provisioning"
+          },
+          "query": "mutation createAPITokenMutation($operator_id: Int, $name: String) {\n  createAPIToken(token_type: \"User\", operator_id: $operator_id, name: $name) {\n    id\n    token_value\n    token_type\n    status\n    error\n    operator_id\n    name\n    created_by\n    creation_time\n    __typename\n  }\n}"
+      }
+  register: api_auth_response
+
+- name: Save API token to disk
+  ansible.builtin.copy:
+    dest: "{{ api_token_file }}"
+    content: "{{ api_auth_response.json.data.createAPIToken.token_value }}"
+    mode: "0600"
+  when:
+    - (api_auth_response.stdout is not defined) or ('skipped' not in api_auth_response.stdout)
+
+- name: Read API token from disk
+  ansible.builtin.slurp:
+    src: "{{ api_token_file }}"
+  register: mythic_api_token
+
+- name: Ensure pip is available
+  ansible.builtin.apt:
+    name:
+      - python3-pip
+      - python3-setuptools
+    state: present
+    update_cache: true
+
+- name: Install Mythic Python client library (required by payload_setup.py)
+  ansible.builtin.pip:
+    name: mythic
+    state: present
+    extra_args: "--break-system-packages"
+
+- name: Run Mythic payload setup script
+  ansible.builtin.script:
+    cmd: "./files/payload_setup.py {{ api_token_file }} {{ teamserver_ip }}"
+    executable: python3
+    creates: /usr/local/bin/poseidon-static
+  register: payload_download_url
+
+- name: Download Mythic payload
+  ansible.builtin.get_url:
+    url: "{{ payload_download_url.stdout_lines[-1] }}"
+    dest: /usr/local/bin/poseidon-static
+    validate_certs: false
+    mode: "0755"
+  when: payload_download_url.changed
+
+- name: Deploy agent systemd unit files
+  ansible.builtin.template:
+    owner: root
+    group: root
+    mode: "0644"
+    src: agent_systemd_files.j2
+    dest: "/etc/systemd/system/poseidon-{{ item }}.service"
+  loop: "{{ base_users }}"
+  notify: Daemon reload
+
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start Poseidon agent services
+  ansible.builtin.systemd:
+    enabled: true
+    state: started
+    name: "poseidon-{{ item }}"
+  loop: "{{ base_users }}"
+
+# --- Docker Registry ---
+
+- name: Verify registry certificate exists
+  ansible.builtin.stat:
+    path: /opt/docker-registry/certs/registry.crt
+  register: registry_cert
+
+- name: Verify registry key exists
+  ansible.builtin.stat:
+    path: /opt/docker-registry/certs/registry.key
+  register: registry_key
+
+- name: Fail if certificate or key not found
+  ansible.builtin.fail:
+    msg: "Registry certificate or key not found in /opt/docker-registry/certs/"
+  when: not registry_cert.stat.exists or not registry_key.stat.exists
+
+- name: Create docker registry data directory
+  ansible.builtin.file:
+    path: /opt/docker-registry/data
+    state: directory
+    mode: "0755"
+
+- name: Create docker registry container with TLS
+  community.docker.docker_container:
+    name: docker_registry
+    image: docker.io/registry:3
+    restart_policy: unless-stopped
+    published_ports:
+      - "5000:5000"
+    env:
+      REGISTRY_HTTP_ADDR: "0.0.0.0:5000"
+      REGISTRY_HTTP_TLS_CERTIFICATE: "/certs/registry.crt"
+      REGISTRY_HTTP_TLS_KEY: "/certs/registry.key"
+    volumes:
+      - /opt/docker-registry/data:/var/lib/registry
+      - /opt/docker-registry/certs:/certs:ro

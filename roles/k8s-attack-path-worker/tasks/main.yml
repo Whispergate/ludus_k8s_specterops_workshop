@@ -1,0 +1,53 @@
+---
+- name: Get node IP
+  ansible.builtin.set_fact:
+    node_ip: "{{ ansible_host }}"
+
+- name: Configure kubelet EXTRA_ARGS
+  ansible.builtin.copy:
+    content: |
+      KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
+    dest: /etc/default/kubelet
+    mode: "0644"
+
+- name: Copy join command from controller
+  ansible.builtin.copy:
+    src: "{{ staging_dir }}/join-command"
+    dest: /tmp/k8s-join-command
+    mode: "0644"
+
+- name: Read join command
+  ansible.builtin.slurp:
+    src: /tmp/k8s-join-command
+  register: join_cmd_raw
+
+- name: Check if node already joined
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubelet_conf
+
+- name: Join the cluster
+  ansible.builtin.shell: "{{ join_cmd_raw.content | b64decode | trim }}"
+  when: not kubelet_conf.stat.exists
+
+- name: Restart kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    state: restarted
+    daemon_reload: true
+
+- name: Create .kube directory for ansible_user
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Copy admin kubeconfig for convenience
+  ansible.builtin.copy:
+    src: "{{ staging_dir }}/admin.conf"
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"

@@ -1,0 +1,5 @@
+---
+staging_dir: "/tmp/k8s-attack-path"
+kubeconfig_users:
+  - name: developer
+    namespace: development

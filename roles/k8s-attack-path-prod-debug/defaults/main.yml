@@ -1,0 +1,6 @@
+---
+staging_dir: "/tmp/k8s-attack-path"
+prod_debug_user_cn: "prod-debug-agent"
+prod_debug_user_o: "k8s-training"
+prod_debug_namespace: "production"
+prod_debug_secret_name: "prod-debug-certs"

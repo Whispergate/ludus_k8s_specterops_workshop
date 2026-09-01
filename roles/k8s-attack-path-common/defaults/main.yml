@@ -1,0 +1,8 @@
+---
+k8s_version: "1.35.1-1.1"
+k8s_major_version: "v1.35"
+calico_version: "v3.28.0"
+tigera_operator_version: "v1.34.0"
+cni_version: "v1.4.0"
+staging_dir: "/tmp/k8s-attack-path"
+hosts_entries: []

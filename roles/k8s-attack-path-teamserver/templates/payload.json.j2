@@ -1,0 +1,148 @@
+{
+    "selected_os": "Linux",
+    "payload_type": "poseidon",
+    "filename": "poseidon-static.bin",
+    "description": "",
+    "commands": [
+        "caffeinate",
+        "cat",
+        "cd",
+        "chmod",
+        "clipboard",
+        "clipboard_monitor",
+        "config",
+        "cp",
+        "curl",
+        "curl_env_clear",
+        "curl_env_get",
+        "curl_env_set",
+        "download",
+        "download_bulk",
+        "drives",
+        "execute_library",
+        "exit",
+        "getenv",
+        "getuser",
+        "head",
+        "ifconfig",
+        "jobkill",
+        "jobs",
+        "jsimport",
+        "jsimport_call",
+        "jxa",
+        "keylog",
+        "keys",
+        "kill",
+        "libinject",
+        "link_tcp",
+        "link_webshell",
+        "list_entitlements",
+        "listtasks",
+        "ls",
+        "lsopen",
+        "mkdir",
+        "mv",
+        "persist_launchd",
+        "persist_loginitem",
+        "portscan",
+        "print_c2",
+        "print_p2p",
+        "prompt",
+        "ps",
+        "pty",
+        "pwd",
+        "rm",
+        "rpfwd",
+        "run",
+        "screencapture",
+        "setenv",
+        "shell",
+        "shell_config",
+        "sleep",
+        "socks",
+        "ssh",
+        "sshauth",
+        "sudo",
+        "tail",
+        "tcc_check",
+        "test_password",
+        "triagedirectory",
+        "unlink_tcp",
+        "unlink_webshell",
+        "unsetenv",
+        "update_c2",
+        "upload",
+        "xpc_load",
+        "xpc_manageruid",
+        "xpc_procinfo",
+        "xpc_send",
+        "xpc_service",
+        "xpc_submit",
+        "xpc_unload"
+    ],
+    "build_parameters": [
+        {
+            "name": "mode",
+            "value": "default"
+        },
+        {
+            "name": "architecture",
+            "value": "AMD_x64"
+        },
+        {
+            "name": "debug",
+            "value": false
+        },
+        {
+            "name": "garble",
+            "value": false
+        },
+        {
+            "name": "static",
+            "value": true
+        },
+        {
+            "name": "egress_order",
+            "value": [
+                "http",
+                "websocket",
+                "dynamichttp",
+                "httpx"
+            ]
+        },
+        {
+            "name": "egress_failover",
+            "value": "failover"
+        },
+        {
+            "name": "failover_threshold",
+            "value": 10
+        },
+        {
+            "name": "proxy_bypass",
+            "value": false
+        }
+    ],
+    "c2_profiles": [
+        {
+            "c2_profile": "http",
+            "c2_profile_parameters": {
+                "AESPSK": "aes256_hmac",
+                "callback_host": "http://{{ ansible_default_ipv4.address }}",
+                "callback_interval": "1",
+                "callback_jitter": "23",
+                "callback_port": "80",
+                "encrypted_exchange_check": "true",
+                "headers": {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 6.3; Trident/7.0; rv:11.0) like Gecko"
+                },
+                "killdate": "{{ now().fromtimestamp((now().timestamp() | int) + (31*24*60*60)).strftime('%Y-%m-%d') }}",
+                "post_uri": "data",
+                "proxy_host": "",
+                "proxy_pass": "",
+                "proxy_port": "",
+                "proxy_user": ""
+            }
+        }
+    ]
+}

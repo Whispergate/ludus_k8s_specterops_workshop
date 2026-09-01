@@ -1,0 +1,47 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: cicd-block-node-steering
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+        scope: "Namespaced"
+  validations:
+    - expression: "!has(object.spec.nodeName)"
+      message: "Direct node pinning is not allowed in the cicd namespace during Lab 2."
+    - expression: "!has(object.spec.nodeSelector) || size(object.spec.nodeSelector) == 0"
+      message: "nodeSelector is not allowed in the cicd namespace during Lab 2."
+    - expression: "!has(object.spec.affinity) || !has(object.spec.affinity.nodeAffinity)"
+      message: "Node affinity is not allowed in the cicd namespace during Lab 2."
+    - message: "Non-default tolerations are not allowed in the cicd namespace during Lab 2."
+      expression: |
+        !has(object.spec.tolerations) ||
+        object.spec.tolerations.all(t,
+          has(t.key) &&
+          t.key in [
+            'node.kubernetes.io/not-ready',
+            'node.kubernetes.io/unreachable'
+          ] &&
+          t.operator == 'Exists' &&
+          t.effect == 'NoExecute' &&
+          (!has(t.value) || t.value == '') &&
+          has(t.tolerationSeconds)
+        )
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: cicd-block-node-steering
+spec:
+  policyName: cicd-block-node-steering
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: cicd

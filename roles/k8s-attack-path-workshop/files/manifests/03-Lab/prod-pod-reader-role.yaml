@@ -1,0 +1,28 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prod-pod-reader
+  namespace: production
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - configmaps
+    verbs:
+      - get
+      - list
+  - apiGroups: [""]
+    resources:
+      - secrets
+    verbs:
+      - list
+  - apiGroups: [""]
+    resources:
+      - services
+    verbs:
+      - get
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+    verbs:
+      - get

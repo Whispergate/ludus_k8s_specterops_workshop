@@ -1,0 +1,23 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: k8s_attack_path_registry_cert
+  author: k8s-attack-path-workshop
+  description: Generates and installs the self-signed TLS certificate used by the workshop's private Docker registry; can generate on the control plane and install into containerd on K8s nodes or into the docker registry on the teamserver
+  company: ''
+  license: Apache-2.0
+  min_ansible_version: "2.10"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - kubernetes
+    - registry
+    - tls
+    - workshop
+    - ludus
+
+collections: []

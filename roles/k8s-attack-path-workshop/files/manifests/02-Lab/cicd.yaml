@@ -1,0 +1,28 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: developer-cicd-debug
+  namespace: cicd
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: code-server-cicd-rb
+  namespace: cicd
+subjects:
+  - kind: ServiceAccount
+    name: code-server
+    namespace: development
+roleRef:
+  kind: Role
+  name: developer-cicd-debug
+  apiGroup: rbac.authorization.k8s.io

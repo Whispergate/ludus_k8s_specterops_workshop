@@ -1,0 +1,158 @@
+# Ludus Range Configuration - K8s Attack Path Workshop (Part 1)
+#
+# Converted from Vagrant-based lab: https://github.com/bmuschko/cks-study-guide
+# Original Kubernetes cluster + Mythic C2 teamserver environment
+#
+# Prerequisites:
+#   1. Build or import an Ubuntu 24.04 template:
+#      ludus templates add -d ubuntu-24.04-x64-server
+#      ludus templates build
+#   2. Install collections:
+#      ludus ansible collection add community.general
+#      ludus ansible collection add community.docker
+#   3. Install the Mythic teamserver role (Whispergate/0xRedpoll):
+#      ludus ansible role add-from-git https://github.com/Whispergate/ludus_mythic_teamserver.git
+#   4. Install custom roles:
+#      for role in ludus-range/roles/k8s-attack-path-*; do
+#        ludus ansible role add "$role"
+#      done
+#   5. Set and deploy:
+#      ludus range config set -f ludus-range/config.yml
+#      ludus range deploy
+#
+# Access:
+#   Mythic C2 UI:  https://<teamserver_ip>:7443
+#   Code-server:   kubectl port-forward on the code-server pod (port 8080)
+#   Cluster admin:  SSH to control-plane-1, kubeconfig at ~/.kube/config
+
+ludus:
+  # --- Control Plane (must be first - workers depend on it) ---
+  - vm_name: "{{ range_id }}-k8s-control-plane-1"
+    hostname: "k8s-control-plane-1"
+    template: ubuntu-24.04-x64-server-template
+    vlan: 10
+    ip_last_octet: 20
+    ram_gb: 4
+    cpus: 2
+    linux: true
+    testing:
+      snapshot: false
+      block_internet: false
+    roles:
+      - k8s-attack-path-common
+      - k8s-attack-path-registry-cert
+      - k8s-attack-path-control-plane
+      - k8s-attack-path-prod-debug
+    role_vars:
+      control_plane_ip: "10.{{ range_second_octet }}.10.20"
+      teamserver_ip: "10.{{ range_second_octet }}.10.10"
+      registry_cert_generate: true
+      registry_cert_install_containerd: true
+      registry_cert_install_registry: false
+      hosts_entries:
+        - ip: "10.{{ range_second_octet }}.10.10"
+          names: "teamserver k8s-workshop-teamserver"
+        - ip: "10.{{ range_second_octet }}.10.20"
+          names: "k8s-control-plane-1"
+        - ip: "10.{{ range_second_octet }}.10.30"
+          names: "k8s-worker-1"
+        - ip: "10.{{ range_second_octet }}.10.31"
+          names: "k8s-worker-2"
+
+  # --- Worker 1 (tainted for later labs) ---
+  - vm_name: "{{ range_id }}-k8s-worker-1"
+    hostname: "k8s-worker-1"
+    template: ubuntu-24.04-x64-server-template
+    vlan: 10
+    ip_last_octet: 30
+    ram_gb: 2
+    cpus: 1
+    linux: true
+    testing:
+      snapshot: false
+      block_internet: false
+    roles:
+      - k8s-attack-path-common
+      - k8s-attack-path-registry-cert
+      - k8s-attack-path-worker
+    role_vars:
+      control_plane_ip: "10.{{ range_second_octet }}.10.20"
+      teamserver_ip: "10.{{ range_second_octet }}.10.10"
+      registry_cert_generate: false
+      registry_cert_install_containerd: true
+      registry_cert_install_registry: false
+      hosts_entries:
+        - ip: "10.{{ range_second_octet }}.10.10"
+          names: "teamserver k8s-workshop-teamserver"
+        - ip: "10.{{ range_second_octet }}.10.20"
+          names: "k8s-control-plane-1"
+        - ip: "10.{{ range_second_octet }}.10.30"
+          names: "k8s-worker-1"
+        - ip: "10.{{ range_second_octet }}.10.31"
+          names: "k8s-worker-2"
+
+  # --- Worker 2 (also deploys workshop manifests after joining) ---
+  - vm_name: "{{ range_id }}-k8s-worker-2"
+    hostname: "k8s-worker-2"
+    template: ubuntu-24.04-x64-server-template
+    vlan: 10
+    ip_last_octet: 31
+    ram_gb: 2
+    cpus: 1
+    linux: true
+    testing:
+      snapshot: false
+      block_internet: false
+    roles:
+      - k8s-attack-path-common
+      - k8s-attack-path-registry-cert
+      - k8s-attack-path-worker
+      - k8s-attack-path-workshop
+    role_vars:
+      control_plane_ip: "10.{{ range_second_octet }}.10.20"
+      teamserver_ip: "10.{{ range_second_octet }}.10.10"
+      registry_cert_generate: false
+      registry_cert_install_containerd: true
+      registry_cert_install_registry: false
+      hosts_entries:
+        - ip: "10.{{ range_second_octet }}.10.10"
+          names: "teamserver k8s-workshop-teamserver"
+        - ip: "10.{{ range_second_octet }}.10.20"
+          names: "k8s-control-plane-1"
+        - ip: "10.{{ range_second_octet }}.10.30"
+          names: "k8s-worker-1"
+        - ip: "10.{{ range_second_octet }}.10.31"
+          names: "k8s-worker-2"
+
+  # --- Teamserver (Mythic C2 + Docker Registry) ---
+  - vm_name: "{{ range_id }}-teamserver"
+    hostname: "k8s-workshop-teamserver"
+    template: ubuntu-24.04-x64-server-template
+    vlan: 10
+    ip_last_octet: 10
+    ram_gb: 8
+    cpus: 4
+    linux: true
+    testing:
+      snapshot: false
+      block_internet: false
+    roles:
+      - k8s-attack-path-registry-cert
+      - whispergate.ludus_mythic_teamserver
+      - k8s-attack-path-teamserver
+      - k8s-attack-path-kubeconfig
+    role_vars:
+      control_plane_ip: "10.{{ range_second_octet }}.10.20"
+      teamserver_ip: "10.{{ range_second_octet }}.10.10"
+      registry_cert_generate: false
+      registry_cert_install_containerd: false
+      registry_cert_install_registry: true
+      hosts_entries:
+        - ip: "10.{{ range_second_octet }}.10.10"
+          names: "teamserver k8s-workshop-teamserver"
+        - ip: "10.{{ range_second_octet }}.10.20"
+          names: "k8s-control-plane-1"
+        - ip: "10.{{ range_second_octet }}.10.30"
+          names: "k8s-worker-1"
+        - ip: "10.{{ range_second_octet }}.10.31"
+          names: "k8s-worker-2"

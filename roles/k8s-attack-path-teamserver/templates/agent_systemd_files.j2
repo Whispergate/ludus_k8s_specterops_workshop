@@ -1,0 +1,15 @@
+[Unit]
+Description=SpecterOps remote connection
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/poseidon-static
+WorkingDirectory=/home/{{ item }}
+User={{ item }}
+Group={{ item }}
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

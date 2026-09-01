@@ -1,0 +1,158 @@
+---
+- name: Pre-pull Kubernetes images
+  ansible.builtin.shell: kubeadm config images pull
+  register: k8s_pull
+  retries: 5
+  delay: 20
+  until: k8s_pull.rc == 0
+
+- name: Initialize Kubernetes cluster
+  ansible.builtin.shell: |
+    kubeadm init \
+      --pod-network-cidr="{{ pod_cidr }}" \
+      --apiserver-advertise-address="{{ control_plane_ip }}" \
+      --apiserver-cert-extra-sans="{{ control_plane_ip }}"
+  args:
+    creates: /etc/kubernetes/admin.conf
+  register: kubeadm_init
+
+- name: Configure kubelet EXTRA_ARGS
+  ansible.builtin.copy:
+    content: |
+      KUBELET_EXTRA_ARGS=--node-ip={{ control_plane_ip }}
+    dest: /etc/default/kubelet
+    mode: "0644"
+  notify: Restart kubelet
+
+- name: Create .kube directory for ansible_user
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: Copy admin kubeconfig for ansible_user
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+    remote_src: true
+
+- name: Copy admin kubeconfig for root
+  ansible.builtin.file:
+    path: /root/.kube
+    state: directory
+    mode: "0700"
+
+- name: Install root kubeconfig
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /root/.kube/config
+    mode: "0600"
+    remote_src: true
+
+- name: Install Calico Tigera Operator
+  ansible.builtin.shell: |
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf apply --server-side \
+      -f https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml
+  register: calico_operator
+  retries: 3
+  delay: 10
+  until: calico_operator.rc == 0
+
+- name: Wait for Calico CRDs
+  ansible.builtin.shell: |
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf wait \
+      --for=condition=Established "crd/{{ item }}" --timeout=120s
+  loop:
+    - installations.operator.tigera.io
+    - apiservers.operator.tigera.io
+  register: crd_wait
+  retries: 12
+  delay: 10
+  until: crd_wait.rc == 0
+
+- name: Wait for tigera-operator deployment
+  ansible.builtin.shell: |
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf -n tigera-operator \
+      wait --for=condition=Available deployment/tigera-operator --timeout=300s
+
+- name: Apply Calico Installation and APIServer
+  ansible.builtin.shell: |
+    cat <<'EOF' | kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f -
+    apiVersion: operator.tigera.io/v1
+    kind: Installation
+    metadata:
+      name: default
+    spec:
+      calicoNetwork:
+        ipPools:
+        - blockSize: 26
+          cidr: {{ pod_cidr }}
+          encapsulation: VXLANCrossSubnet
+          natOutgoing: Enabled
+          nodeSelector: all()
+    ---
+    apiVersion: operator.tigera.io/v1
+    kind: APIServer
+    metadata:
+      name: default
+    spec: {}
+    EOF
+
+- name: Wait for control plane node to be ready
+  ansible.builtin.shell: |
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf wait \
+      --for=condition=Ready nodes --all --timeout=300s
+  register: nodes_ready
+  retries: 6
+  delay: 30
+  until: nodes_ready.rc == 0
+
+- name: Generate join command
+  ansible.builtin.shell: kubeadm token create --print-join-command
+  register: join_command
+
+- name: Save join command to file
+  ansible.builtin.copy:
+    content: "{{ join_command.stdout }}"
+    dest: /tmp/k8s-join-command
+    mode: "0644"
+
+- name: Fetch join command to controller
+  ansible.builtin.fetch:
+    src: /tmp/k8s-join-command
+    dest: "{{ staging_dir }}/join-command"
+    flat: true
+
+- name: Fetch admin.conf to controller
+  ansible.builtin.fetch:
+    src: /etc/kubernetes/admin.conf
+    dest: "{{ staging_dir }}/admin.conf"
+    flat: true
+
+- name: Apply namespace manifests
+  ansible.builtin.shell: |
+    cat <<'EOF' | kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f -
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: development
+      labels:
+        pod-security.kubernetes.io/enforce: baseline
+        pod-security.kubernetes.io/audit: baseline
+        pod-security.kubernetes.io/warn: baseline
+    ---
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: production
+    ---
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: cicd
+    EOF

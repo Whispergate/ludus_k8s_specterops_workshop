@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: prod-backend
+  namespace: production
+  labels:
+    app: prod-backend
+spec:
+  nodeName: k8s-worker-2
+  serviceAccountName: default
+  containers:
+    - name: prod-backend
+      image: nginx:alpine
+      envFrom:
+        - configMapRef:
+            name: kubeconfig-values
+      volumeMounts:
+        - name: kubeconfig-template
+          mountPath: /config
+          readOnly: true
+        - name: certs
+          mountPath: /certs
+          readOnly: true
+      resources:
+        requests:
+          cpu: "50m"
+          memory: "64Mi"
+        limits:
+          cpu: "100m"
+          memory: "128Mi"
+  volumes:
+    - name: kubeconfig-template
+      configMap:
+        name: kubeconfig-template
+    - name: certs
+      secret:
+        secretName: prod-debug-certs

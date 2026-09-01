@@ -1,0 +1,5 @@
+---
+pod_cidr: "10.244.0.0/16"
+control_plane_ip: "{{ ansible_host }}"
+staging_dir: "/tmp/k8s-attack-path"
+calico_version: "v3.28.0"

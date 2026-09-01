@@ -1,0 +1,25 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: k8s_attack_path_teamserver
+  author: k8s-attack-path-workshop
+  description: Workshop-specific layer on top of whispergate.ludus_mythic_teamserver — installs extra Mythic agents (container_wrapper/container_registry), builds Poseidon payload, deploys workshop users + Poseidon systemd units, and runs the TLS Docker registry
+  company: ''
+  license: Apache-2.0
+  min_ansible_version: "2.10"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - mythic
+    - c2
+    - kubernetes
+    - workshop
+    - ludus
+
+collections:
+  - community.general
+  - community.docker

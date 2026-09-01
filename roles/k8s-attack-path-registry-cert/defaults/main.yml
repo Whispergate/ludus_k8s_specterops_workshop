@@ -1,0 +1,7 @@
+---
+teamserver_ip: ""
+staging_dir: "/tmp/k8s-attack-path"
+registry_cert_generate: false
+registry_cert_install_containerd: false
+registry_cert_install_registry: false
+hosts_entries: []

@@ -1,0 +1,18 @@
+---
+- name: Create docker registry certificate directory
+  ansible.builtin.file:
+    path: /opt/docker-registry/certs
+    state: directory
+    mode: "0755"
+
+- name: Copy registry certificate for docker registry
+  ansible.builtin.copy:
+    src: "{{ staging_dir }}/certs/registry.crt"
+    dest: /opt/docker-registry/certs/registry.crt
+    mode: "0644"
+
+- name: Copy registry key for docker registry
+  ansible.builtin.copy:
+    src: "{{ staging_dir }}/certs/registry.key"
+    dest: /opt/docker-registry/certs/registry.key
+    mode: "0600"

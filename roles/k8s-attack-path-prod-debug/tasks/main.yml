@@ -1,0 +1,108 @@
+---
+- name: Create cert output directory
+  ansible.builtin.file:
+    path: /tmp/prod-debug-certs
+    state: directory
+    mode: "0700"
+
+- name: Generate client private key
+  ansible.builtin.shell: openssl genrsa -out /tmp/prod-debug-certs/client.key 2048
+  args:
+    creates: /tmp/prod-debug-certs/client.key
+
+- name: Generate client CSR
+  ansible.builtin.shell: |
+    openssl req -new \
+      -key /tmp/prod-debug-certs/client.key \
+      -out /tmp/prod-debug-certs/client.csr \
+      -subj "/CN={{ prod_debug_user_cn }}/O={{ prod_debug_user_o }}"
+  args:
+    creates: /tmp/prod-debug-certs/client.csr
+
+- name: Read CSR content
+  ansible.builtin.slurp:
+    src: /tmp/prod-debug-certs/client.csr
+  register: csr_content
+
+- name: Generate unique CSR name
+  ansible.builtin.set_fact:
+    csr_name: "prod-debug-agent-client-{{ ansible_date_time.epoch }}"
+
+- name: Create Kubernetes CSR object
+  ansible.builtin.shell: |
+    cat <<EOF | kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f -
+    apiVersion: certificates.k8s.io/v1
+    kind: CertificateSigningRequest
+    metadata:
+      name: {{ csr_name }}
+    spec:
+      request: {{ csr_content.content }}
+      signerName: kubernetes.io/kube-apiserver-client
+      usages:
+        - digital signature
+        - key encipherment
+        - client auth
+    EOF
+
+- name: Approve the CSR
+  ansible.builtin.shell: |
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf certificate approve {{ csr_name }}
+
+- name: Wait for signed certificate
+  ansible.builtin.shell: |
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf wait \
+      --for=jsonpath='{.status.certificate}' \
+      --timeout=60s "csr/{{ csr_name }}"
+  register: cert_wait
+  retries: 6
+  delay: 10
+  until: cert_wait.rc == 0
+
+- name: Extract signed certificate
+  ansible.builtin.shell: |
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf get csr {{ csr_name }} \
+      -o jsonpath='{.status.certificate}' | base64 -d > /tmp/prod-debug-certs/client.crt
+
+- name: Copy cluster CA certificate
+  ansible.builtin.copy:
+    src: /etc/kubernetes/pki/ca.crt
+    dest: /tmp/prod-debug-certs/ca.crt
+    remote_src: true
+    mode: "0644"
+
+- name: Ensure production namespace exists
+  ansible.builtin.shell: |
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf get namespace {{ prod_debug_namespace }} || \
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf create namespace {{ prod_debug_namespace }}
+  changed_when: false
+
+- name: Create Kubernetes secret with client certificates
+  ansible.builtin.shell: |
+    cat <<EOF | kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f -
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: {{ prod_debug_secret_name }}
+      namespace: {{ prod_debug_namespace }}
+    type: Opaque
+    data:
+      client.crt: $(base64 -w0 < /tmp/prod-debug-certs/client.crt)
+      client.key: $(base64 -w0 < /tmp/prod-debug-certs/client.key)
+      ca.crt: $(base64 -w0 < /tmp/prod-debug-certs/ca.crt)
+    EOF
+
+- name: Clean up CSR object
+  ansible.builtin.shell: |
+    kubectl --kubeconfig=/etc/kubernetes/admin.conf delete csr {{ csr_name }}
+  changed_when: false
+  failed_when: false
+
+- name: Fetch prod-debug certs to controller for reference
+  ansible.builtin.fetch:
+    src: "/tmp/prod-debug-certs/{{ item }}"
+    dest: "{{ staging_dir }}/prod-debug-certs/{{ item }}"
+    flat: true
+  loop:
+    - client.crt
+    - client.key
+    - ca.crt

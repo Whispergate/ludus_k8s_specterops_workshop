@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prod-debug-agent-observer-binding
+subjects:
+  - kind: User
+    name: prod-debug-agent
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: prod-debug-agent-observer
+  apiGroup: rbac.authorization.k8s.io

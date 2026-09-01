@@ -1,0 +1,89 @@
+---
+- name: Configure /etc/hosts for workshop VMs
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} K8s Attack Path Workshop"
+    block: |
+      {% for entry in hosts_entries %}
+      {{ entry.ip }} {{ entry.names }}
+      {% endfor %}
+  when: hosts_entries | length > 0
+
+# --- Certificate Generation (only on control-plane) ---
+
+- name: Create local cert staging directory
+  ansible.builtin.file:
+    path: "{{ staging_dir }}/certs"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+  when: registry_cert_generate
+
+- name: Create cert working directory
+  ansible.builtin.file:
+    path: /tmp/registry-certs
+    state: directory
+    mode: "0700"
+  when: registry_cert_generate
+
+- name: Template OpenSSL config
+  ansible.builtin.template:
+    src: openssl.cnf.j2
+    dest: /tmp/registry-certs/openssl.cnf
+    mode: "0644"
+  when: registry_cert_generate
+
+- name: Generate registry private key
+  ansible.builtin.shell: openssl genrsa -out /tmp/registry-certs/registry.key 4096
+  args:
+    creates: /tmp/registry-certs/registry.key
+  when: registry_cert_generate
+
+- name: Generate registry self-signed certificate
+  ansible.builtin.shell: |
+    openssl req -new -x509 -sha256 \
+      -key /tmp/registry-certs/registry.key \
+      -out /tmp/registry-certs/registry.crt \
+      -days 3650 \
+      -config /tmp/registry-certs/openssl.cnf
+  args:
+    creates: /tmp/registry-certs/registry.crt
+  when: registry_cert_generate
+
+- name: Fetch registry certificate to controller
+  ansible.builtin.fetch:
+    src: /tmp/registry-certs/registry.crt
+    dest: "{{ staging_dir }}/certs/registry.crt"
+    flat: true
+  when: registry_cert_generate
+
+- name: Fetch registry key to controller
+  ansible.builtin.fetch:
+    src: /tmp/registry-certs/registry.key
+    dest: "{{ staging_dir }}/certs/registry.key"
+    flat: true
+  when: registry_cert_generate
+
+# --- Certificate Installation for K8s nodes (containerd) ---
+
+- name: Copy registry certificate from controller
+  ansible.builtin.copy:
+    src: "{{ staging_dir }}/certs/registry.crt"
+    dest: /usr/local/share/ca-certificates/docker-registry.crt
+    mode: "0644"
+  when: registry_cert_install_containerd or registry_cert_install_registry
+
+- name: Update system CA certificates
+  ansible.builtin.shell: update-ca-certificates
+  when: registry_cert_install_containerd or registry_cert_install_registry
+
+- name: Configure containerd registry trust
+  ansible.builtin.include_tasks: install_containerd.yml
+  when: registry_cert_install_containerd
+
+# --- Certificate Installation for Teamserver (docker registry) ---
+
+- name: Install registry cert and key for docker registry
+  ansible.builtin.include_tasks: install_registry.yml
+  when: registry_cert_install_registry

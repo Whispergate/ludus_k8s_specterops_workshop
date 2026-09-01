@@ -1,0 +1,22 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: k8s_attack_path_kubeconfig
+  author: k8s-attack-path-workshop
+  description: Generates per-user kubeconfigs from ServiceAccount tokens for the K8s Attack Path workshop (drops them at /home/<user>/.kube/config on the teamserver)
+  company: ''
+  license: Apache-2.0
+  min_ansible_version: "2.10"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - kubernetes
+    - kubeconfig
+    - workshop
+    - ludus
+
+collections: []

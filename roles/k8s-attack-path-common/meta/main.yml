@@ -1,0 +1,24 @@
+---
+dependencies: []
+
+galaxy_info:
+  role_name: k8s_attack_path_common
+  author: k8s-attack-path-workshop
+  description: Common Kubernetes node setup (containerd, kubeadm, kubelet, Calico image pre-pull, kernel modules, swap disable) for the K8s Attack Path workshop
+  company: ''
+  license: Apache-2.0
+  min_ansible_version: "2.10"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - jammy
+        - noble
+  galaxy_tags:
+    - kubernetes
+    - k8s
+    - workshop
+    - ludus
+
+collections:
+  - community.general
+  - ansible.posix

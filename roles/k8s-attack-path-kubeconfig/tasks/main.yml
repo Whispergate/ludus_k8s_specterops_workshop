@@ -1,0 +1,22 @@
+---
+- name: Copy admin kubeconfig from controller
+  ansible.builtin.copy:
+    src: "{{ staging_dir }}/admin.conf"
+    dest: /tmp/admin.conf
+    mode: "0600"
+
+- name: Get K8s API server address
+  ansible.builtin.shell: kubectl --kubeconfig=/tmp/admin.conf config view --raw -o jsonpath='{.clusters[0].cluster.server}'
+  register: k8s_server
+  changed_when: false
+
+- name: Get K8s CA data
+  ansible.builtin.shell: kubectl --kubeconfig=/tmp/admin.conf config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}'
+  register: k8s_ca_data
+  changed_when: false
+
+- name: Generate kubeconfig for each user
+  ansible.builtin.include_tasks: generate_user_kubeconfig.yml
+  loop: "{{ kubeconfig_users }}"
+  loop_control:
+    loop_var: kube_user

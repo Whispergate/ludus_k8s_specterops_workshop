@@ -1,0 +1,14 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prod-rolebinding-manager-binding
+  namespace: production
+subjects:
+  - kind: User
+    name: prod-debug-agent
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: prod-rolebinding-manager
+  apiGroup: rbac.authorization.k8s.io

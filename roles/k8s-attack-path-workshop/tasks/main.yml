@@ -1,0 +1,57 @@
+---
+- name: Create kubeconfig directory for root
+  ansible.builtin.file:
+    path: /root/.kube
+    state: directory
+    mode: "0700"
+
+- name: Copy admin kubeconfig for kubectl access
+  ansible.builtin.copy:
+    src: "{{ staging_dir }}/admin.conf"
+    dest: /root/.kube/config
+    mode: "0600"
+
+- name: Wait for all cluster nodes to be Ready
+  ansible.builtin.shell: kubectl wait --for=condition=Ready nodes --all --timeout=600s
+  register: nodes_ready
+  retries: 10
+  delay: 30
+  until: nodes_ready.rc == 0
+
+- name: Wait for kube-system pods to be Ready
+  ansible.builtin.shell: kubectl wait --for=condition=Ready pods -n kube-system --all --timeout=600s
+  register: system_pods_ready
+  retries: 5
+  delay: 30
+  until: system_pods_ready.rc == 0
+
+- name: Taint k8s-worker-1 for later labs
+  ansible.builtin.shell: kubectl taint nodes k8s-worker-1 workshop/reserved-for-later=true:NoSchedule --overwrite
+  register: taint_result
+  changed_when: "'tainted' in taint_result.stdout"
+
+- name: Copy workshop manifests to VM
+  ansible.builtin.copy:
+    src: manifests/
+    dest: /tmp/workshop-manifests/
+    mode: "0644"
+
+- name: Apply namespace manifests first
+  ansible.builtin.shell: kubectl apply -f /tmp/workshop-manifests/01-Lab/00-namespaces.yaml
+  register: ns_apply
+  changed_when: "'configured' in ns_apply.stdout or 'created' in ns_apply.stdout"
+
+- name: Find all manifest files
+  ansible.builtin.find:
+    paths: /tmp/workshop-manifests
+    patterns: "*.yaml"
+    recurse: true
+    excludes:
+      - "00-namespaces.yaml"
+  register: manifest_files
+
+- name: Apply all workshop manifests
+  ansible.builtin.shell: "kubectl apply -f {{ item.path }}"
+  loop: "{{ manifest_files.files | sort(attribute='path') }}"
+  register: manifest_apply
+  changed_when: "'configured' in manifest_apply.stdout or 'created' in manifest_apply.stdout"

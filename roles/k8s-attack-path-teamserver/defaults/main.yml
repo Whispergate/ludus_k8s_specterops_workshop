@@ -1,0 +1,11 @@
+---
+mythic_dir: "/opt/mythic"
+mythic_cli: "{{ mythic_dir }}/mythic-cli"
+api_token_file: "{{ mythic_dir }}/.api_token"
+teamserver_ip: "{{ ansible_host }}"
+staging_dir: "/tmp/k8s-attack-path"
+hosts_entries: []
+
+base_users:
+  - developer
+  - noaccess

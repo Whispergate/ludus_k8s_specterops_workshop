@@ -1,0 +1,31 @@
+---
+- name: Create containerd certs.d directories
+  ansible.builtin.file:
+    path: "/etc/containerd/certs.d/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ teamserver_ip }}:5000"
+    - "teamserver:5000"
+    - "k8s-workshop-teamserver:5000"
+
+- name: Create containerd hosts.toml for each registry address
+  ansible.builtin.copy:
+    content: |
+      server = "https://{{ item }}:5000"
+
+      [host."https://{{ item }}:5000"]
+        ca = "/usr/local/share/ca-certificates/docker-registry.crt"
+        skip_verify = false
+    dest: "/etc/containerd/certs.d/{{ item }}:5000/hosts.toml"
+    mode: "0644"
+  loop:
+    - "{{ teamserver_ip }}"
+    - "teamserver"
+    - "k8s-workshop-teamserver"
+
+- name: Restart containerd to pick up new certificates
+  ansible.builtin.systemd:
+    name: containerd
+    state: restarted
+  when: ansible_facts.services['containerd.service'] is defined
